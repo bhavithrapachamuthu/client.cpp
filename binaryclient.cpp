@@ -60,6 +60,7 @@ class Sale : public Value{
     char date[26];
 };
 struct clientdata{
+    SOCKET client;
     int clientid;
     vector<Employee> employees;
     vector<Customer> customers;
@@ -130,13 +131,13 @@ int countNode(Node<T>*root){
     }
 }
 unsigned char makeHeader(int packetID,int frameType){
-    return ((packetID & 0x0F) << 1) | (frameType & 0x01);
+    return (unsigned char)packetID;
 }
 int getPacketID(unsigned char header){
-    return (header >> 1) & 0x0F;
+    return (unsigned char)header;
 }
 int getFrameType(unsigned char header){
-    return header & 0x01;
+    return FRAME_SINGLE;
 }
 bool sendAll(SOCKET sock,const char*buffer,int length){
     int total=0;
@@ -271,9 +272,7 @@ void generateSales(SOCKET client,int saleCount,int saleId,float saleAmount,float
         receiveResult(client);
     }
 } */
-
-void loadJson(SOCKET client,int clientid){
-    printf("json running...\n");
+void loadJson(){
     ifstream file("data.json");
     if(!file){
         printf("File open failed\n");
@@ -281,51 +280,17 @@ void loadJson(SOCKET client,int clientid){
     }
     json j;
     file>>j;
+}
+void jsonConfig(SOCKET client,int clientid){
     clientdata* group=getclientdata(clientid);
+    if(group==NULL){
+        printf("Client %d no Config found\n",clientid);
+        return;
+    }
+    printf("[client %d]employees:%d\n",clientid,(int)group->employees.size());
+    printf("[client %d]customers:%d\n",clientid,(int)group->customers.size());
+    printf("[client %d]sales:%d\n",clientid,(int)group->sales.size());
     sendEmployees(client,group);
-
-   /*  int cuscount=j["cusCount"];
-    int cusId=j["cusId"];
-    string cusName=j["cusName"];
-    char cname[50];
-    strcpy_s(cname,sizeof(cname),empName.c_str());
-    string cusAddress=j["cusAddress"];
-    char address[100];
-    strcpy_s(address,sizeof(address),cusAddress.c_str());
-    generateCus(client,cuscount,cusId,cusName.c_str(),cusAddress.c_str());
-
-    int salecount=j["saleCount"];
-    int saleId=j["saleId"];
-    float saleAmount=j["saleAmount"];
-    float amountIncrement=j["amountIncrement"];
-    generateSales(client,salecount,saleId,saleAmount,amountIncrement); */
-}
-void addEmployee(SOCKET client){
-    sendPacket(client,PACKET_EMPLOYEE_ID,0,FRAME_SINGLE,NULL);
-    Packet p;
-    if(receivePacket(client,p)){
-        if(getPacketID(p.header)==PACKET_RESULT){
-            printf("%n",p.data);
-        }
-    }
-}
-void addCustomer(SOCKET client){
-    sendPacket(client,PACKET_CUSTOMER_ID,0,FRAME_SINGLE,NULL);
-    Packet p;
-    if(receivePacket(client,p)){
-        if(getPacketID(p.header)==PACKET_RESULT){
-            printf("%n",p.data);
-        }
-    } 
-}
-void addSale(SOCKET client){
-    sendPacket(client,PACKET_SALE_ID,0,FRAME_SINGLE,NULL);
-    Packet p;
-    if(receivePacket(client,p)){
-        if(getPacketID(p.header)==PACKET_RESULT){
-            printf("%n",p.data);
-        }
-    }
 }
 void displayEmp(SOCKET client){
     printf("\n========EMPLOYEE DETAILS========\n");
@@ -670,9 +635,11 @@ void searchEmp(SOCKET client){
     }
 }
 DWORD WINAPI clientThread(LPVOID lpParam){
-    SOCKET client=(SOCKET)lpParam;
-    sendEmployees(client,);
-    printf("\nCLIENT HANDLER STARTED\n");
+    clientdata *info=(clientdata*)lpParam;
+    SOCKET client=info->client;
+    int clientid=info->clientid;
+    printf("\nCLIENT %d THREAD STARTED\n",clientid);
+    jsonConfig(client,clientid);
     int choice;
     while(true){
         printf("\n================MENU================\n");
@@ -708,10 +675,13 @@ int main(){
         printf("WSAStartup failed!\n");
         return 1;
     }
+    loadJson();
     int clientNo;
     printf("Enter client No: ");
     scanf("%d",&clientNo);
-    for(int i=0;i<clientNo;i++){
+    HANDLE hThread[10];
+    int threadCount=0;
+    for(int i=0;i<clientNo && i<10;i++){
         int clientid=i+1;
         SOCKET client=socket(AF_INET,SOCK_STREAM,0);
         if(client==INVALID_SOCKET){
@@ -729,14 +699,19 @@ int main(){
             continue;
         }
         printf("Client %d connected successfully\n",clientid);
-        loadJson(client,clientid);
+        clientdata *info=new clientdata;
+        info->client=client;
+        info->clientid=clientid;
         HANDLE thread=CreateThread(NULL,0,clientThread,(LPVOID)client,0,NULL);
         if(thread==NULL){
             printf("Client thread created failed\n");
             continue;
         }
+        hThread[threadCount++]=thread;
         printf("CLIENT THREAD CREATED SUCCESSFULLY");
-        CloseHandle(thread);
+        for(int i=0;i<threadCount;i++){
+            CloseHandle(hThread[i]);
+        }
     }
     WSACleanup();
     return 0;
